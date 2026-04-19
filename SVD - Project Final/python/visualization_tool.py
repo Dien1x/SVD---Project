@@ -13,6 +13,29 @@ from PIL import Image, ImageTk
 
 from core.main_body import *
 
+import ctypes
+import platform
+
+# ----------------------------------------------------------------------------------
+# DPI AWARENESS — Windows only
+# ----------------------------------------------------------------------------------
+# Στα Windows με high-DPI οθόνες (π.χ. 125%, 150% scaling), το Tkinter εμφανίζει
+# θολό κείμενο και θολά widgets γιατί τα Windows κάνουν bitmap upscaling της
+# εφαρμογής αντί να την αφήσουν να σχεδιάσει στη native ανάλυση.
+# Η παρακάτω κλήση δηλώνει στα Windows ότι η εφαρμογή είναι "DPI-aware",
+# οπότε το Tkinter λαμβάνει τις πραγματικές διαστάσεις οθόνης και σχεδιάζει
+# με crisp κείμενο και widgets.
+if platform.system() == "Windows":
+    try:
+        # SetProcessDpiAwareness(2) = PROCESS_PER_MONITOR_DPI_AWARE (Windows 8.1+)
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            # Fallback για παλαιότερα Windows: SetProcessDPIAware
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
 
 # ----------------------------------------------------------------------------------
 # ΓΕΝΙΚΗ ΙΔΕΑ ΚΑΙ ΣΤΡΑΤΗΓΙΚΗ
