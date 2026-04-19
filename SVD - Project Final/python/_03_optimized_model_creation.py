@@ -5,7 +5,6 @@ from core.evaluation import *
 from _03_optimized_k_train import *
 
 import pickle
-from pathlib import Path
 
 # Φόρτωση του dataset και διαχωρισμός σε training και validation set με stratified split
 training_dataset, validation_dataset = split_train_validation_stratified(file_path="data.xlsx", train_set_type="zip", val_ratio=0.2, random_state=42)
