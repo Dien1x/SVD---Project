@@ -1,13 +1,18 @@
 # ===== Τρίτη προσπάθεια κατασκευής μοντέλου αναγνώρισης μοτίβων =====
 
-from core.main_body import *
-from core.evaluation import *
+from main_body import *
+from evaluation import *
 from _03_optimized_k_train import *
 
 import pickle
+import os
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.join(script_dir, "..", "data.xlsx")
+trained_models_dir = os.path.join(script_dir, "..", "trained_models")
 
 # Φόρτωση του dataset και διαχωρισμός σε training και validation set με stratified split
-training_dataset, validation_dataset = split_train_validation_stratified(file_path="data.xlsx", train_set_type="zip", val_ratio=0.2, random_state=42)
+training_dataset, validation_dataset = split_train_validation_stratified(file_path=file_path, train_set_type="zip", val_ratio=0.2, random_state=42)
 
 # Προεπεξεργασία για την κατασκευή των SVD βάσεων για κάθε ψηφίο στο training set
 svd_cache = precompute_digit_svd_bases(training_dataset)
@@ -34,15 +39,15 @@ print(f"Best validation accuracy achieved: {best_val_acc:.2f}%")
 tuned_u_dict = build_u_dictionary_from_svd_cache(svd_cache, tuned_k_map)
 
 # Αποθήκευση του tuned_u_dict και του tuned_k_map σε αρχεία για μελλοντική χρήση
-with open("trained_models/tuned_u_dict.pkl", "wb") as file:
+with open(os.path.join(trained_models_dir, "tuned_u_dict.pkl"), "wb") as file:
     pickle.dump(tuned_u_dict, file)
 
 
 # ανακτηση του tuned_u_dict από το αρχείο για επιβεβαίωση
-with open("trained_models/tuned_u_dict.pkl", "rb") as file:
+with open(os.path.join(trained_models_dir, "tuned_u_dict.pkl"), "rb") as file:
     restored_u_dict = pickle.load(file)
 
 # αξιολόγηση του tuned μοντέλου στο test set
-test_dataset = load_digit_dataset_from_excel(file_path="data.xlsx", set_type="test")
+test_dataset = load_digit_dataset_from_excel(file_path=file_path, set_type="test")
 confusion_matrix, overall_accuracy = evaluate_on_dataset(restored_u_dict, test_dataset)
 print_results(confusion_matrix, overall_accuracy)

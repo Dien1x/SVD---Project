@@ -12,7 +12,7 @@ from tkinter import filedialog
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageTk
 
-from core.evaluation import predict_digit_by_relative_residual
+from evaluation import predict_digit_by_relative_residual
 
 
 # ----------------------------------------------------------------------------------
@@ -87,7 +87,7 @@ MODEL_IMG_SIZE = (16, 16)
 PREVIEW_SIZE = (112, 112)
 
 # Πάχος πινέλου σχεδίασης στον καμβά (σε pixels)
-BRUSH_RADIUS = 18
+BRUSH_RADIUS = 8
 
 # Χρώμα φόντου καμβά (μαύρο, όπως τα MNIST δεδομένα)
 BG_COLOR = "black"
@@ -186,7 +186,7 @@ class DigitPredictor:
 
         # Κεντράρισμα παραθύρου οριζόντια στην οθόνη
         # Αυξημένο ύψος ώστε τα κουμπιά να μην κόβονται σε high-DPI οθόνες
-        w, h = 820, 480
+        w, h = 820, 530
         x = (root.winfo_screenwidth() - w) // 2
         root.geometry(f"{w}x{h}+{x}+80")
 

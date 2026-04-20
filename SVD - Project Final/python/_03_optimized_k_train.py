@@ -3,8 +3,8 @@
 # ===== Έπειτα βελτιστοποίηση των k για κάθε ψηφίο ξεχωριστά, με validation =====
 
 
-from core.main_body import *
-from core.evaluation import *
+from main_body import *
+from evaluation import *
 
 # η ιδέα είναι ΄ότι μπορούμε να ξεκινήσουμε με μια αρχική εκτίμηση των k 
 # για κάθε ψηφίο, βασισμένη σε ένα ενεργειακό κατώφλι (π.χ., 90% της συνολικής ενέργειας),

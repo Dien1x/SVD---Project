@@ -1,8 +1,9 @@
 # ===== Δεύτερη προσπάθεια για την επιλογή των πρώτων k στηλών του U  =====
 # ===== Χρήση των καλύτερων τιμών του πίνακα S για την επιλογή του k =====
 
-from core.main_body import *
+from main_body import *
 import matplotlib.pyplot as plt
+import os
 
 def select_u_columns_by_sigma(
         svd_cache,
@@ -123,7 +124,8 @@ def build_u_dictionary_from_svd_cache_for_sigma(svd_cache, energy_threshold):
 
 if __name__ == "__main__":
     # Example usage
-    file_path = "data.xlsx"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(script_dir, "..", "data.xlsx")
     set_type = "zip"
     dataset_by_digit = load_digit_dataset_from_excel(file_path, set_type)
     svd_cache = precompute_digit_svd_bases(dataset_by_digit)

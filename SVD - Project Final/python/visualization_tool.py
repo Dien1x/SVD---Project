@@ -8,10 +8,11 @@ import tkinter as tk
 from functools import lru_cache
 
 import matplotlib.pyplot as plt
+import os
 import numpy as np
 from PIL import Image, ImageTk
 
-from core.main_body import *
+from main_body import *
 
 import ctypes
 import platform
@@ -63,7 +64,8 @@ if platform.system() == "Windows":
 # ----------------------------------------------------------------------------------
 
 # Διαδρομή του αρχείου Excel που περιέχει το dataset των ψηφίων
-FILE_PATH = "data.xlsx"
+script_dir = os.path.dirname(os.path.abspath(__file__))
+FILE_PATH = os.path.join(script_dir, "..", "data.xlsx")
 
 # Τύπος συμπίεσης του dataset μέσα στο Excel (χρησιμοποιείται από τη load_digit_dataset_from_excel)
 SET_TYPE = "zip"
