@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import filedialog
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw, ImageFilter, ImageTk
 
 from core.evaluation import predict_digit_by_relative_residual
 
@@ -87,7 +87,7 @@ MODEL_IMG_SIZE = (16, 16)
 PREVIEW_SIZE = (112, 112)
 
 # Πάχος πινέλου σχεδίασης στον καμβά (σε pixels)
-BRUSH_RADIUS = 12
+BRUSH_RADIUS = 18
 
 # Χρώμα φόντου καμβά (μαύρο, όπως τα MNIST δεδομένα)
 BG_COLOR = "black"
@@ -151,6 +151,9 @@ class DigitPredictor:
         # Τελευταία θέση ποντικιού — χρησιμοποιείται για τη σχεδίαση συνεχών γραμμών
         self.last_x: int | None = None
         self.last_y: int | None = None
+
+        # Στοίβα αναίρεσης: αποθηκεύει αντίγραφα της PIL εικόνας πριν από κάθε stroke
+        self.undo_stack: list[Image.Image] = []
 
         self._build_ui()
 
@@ -224,6 +227,10 @@ class DigitPredictor:
         self.canvas.bind("<ButtonPress-1>", self._on_mouse_press)
         self.canvas.bind("<B1-Motion>", self._on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_mouse_release)
+
+        # Πλήκτρα πρόσβασης: Enter → Predict, Ctrl+Z → Undo
+        root.bind("<Return>", lambda e: self._predict())
+        root.bind("<Control-z>", self._undo)
 
         # Κουμπιά "Predict" και "Clear" δίπλα-δίπλα, με αρκετό padding ώστε
         # να μην κόβονται σε high-DPI οθόνες
@@ -332,6 +339,9 @@ class DigitPredictor:
         """
         self.last_x, self.last_y = event.x, event.y
 
+        # Αποθήκευση snapshot πριν από κάθε νέο stroke (για Ctrl+Z αναίρεση)
+        self.undo_stack.append(self.pil_image.copy())
+
         # Σχεδίαση κουκκίδας στο σημείο κλικ (για απλό tap χωρίς drag)
         self._draw_point(event.x, event.y)
 
@@ -382,6 +392,9 @@ class DigitPredictor:
         """
         self.last_x = None
         self.last_y = None
+        # Ενημέρωση preview αμέσως μετά το stroke — ο χρήστης βλέπει σε
+        # πραγματικό χρόνο την κεντραρισμένη εικόνα που θα δει το μοντέλο
+        self._update_live_preview()
 
     def _draw_point(self, x: int, y: int):
         """
@@ -412,6 +425,9 @@ class DigitPredictor:
         Σβήνει όλα τα σχεδιαστικά στοιχεία από τον Tkinter καμβά, δημιουργεί
         νέα μαύρη PIL εικόνα παρασκηνίου, και καθαρίζει τα labels αποτελέσματος.
         """
+        # Αποθήκευση snapshot ώστε το Clear να μπορεί να αναιρεθεί με Ctrl+Z
+        self.undo_stack.append(self.pil_image.copy())
+
         # Διαγραφή όλων των στοιχείων από τον Tkinter καμβά
         self.canvas.delete("all")
 
@@ -426,6 +442,109 @@ class DigitPredictor:
         self.preview_label.image = None
 
     # ------------------------------------------------------------------
+    # ΑΝΑΙΡΕΣΗ (CTRL+Z)
+    # ------------------------------------------------------------------
+
+    def _undo(self, event=None):
+        """
+        Αναίρεση της τελευταίας ενέργειας σχεδίασης ή καθαρισμού (Ctrl+Z).
+
+        Επαναφέρει την PIL εικόνα παρασκηνίου στην τελευταία αποθηκευμένη
+        κατάσταση από τη στοίβα αναίρεσης και ξανασχεδιάζει τον Tkinter καμβά.
+        Αν η στοίβα είναι κενή, δεν κάνει τίποτα.
+        """
+        if not self.undo_stack:
+            return
+
+        # Επαναφορά PIL εικόνας στο τελευταίο snapshot
+        self.pil_image = self.undo_stack.pop()
+        self.draw = ImageDraw.Draw(self.pil_image)
+
+        # Ξανασχεδίαση του Tkinter καμβά από την PIL εικόνα
+        self.canvas.delete("all")
+        photo = ImageTk.PhotoImage(self.pil_image)
+        self.canvas.create_image(0, 0, anchor="nw", image=photo)
+        self.canvas._undo_photo = photo  # αποφυγή garbage collection
+
+    # ------------------------------------------------------------------
+    # ΠΡΟΕΠΕΞΕΡΓΑΣΙΑ ΕΙΚΟΝΑΣ
+    # ------------------------------------------------------------------
+
+    def _preprocess(self) -> tuple[Image.Image, np.ndarray] | None:
+        """
+        Προεπεξεργασία της εικόνας του καμβά σε διάνυσμα 256 στοιχείων.
+
+        Σε αντίθεση με το απλό resize, εδώ εντοπίζουμε πρώτα το bounding box
+        της ζωγραφιάς, το κεντράρουμε σε τετράγωνο καμβά με padding, και μόνο
+        τότε κλιμακώνουμε σε 16×16. Αυτό εξασφαλίζει ότι το ίδιο ψηφίο
+        δίνει την ίδια αναπαράσταση ανεξάρτητα από πού το σχεδίασε ο χρήστης
+        στον καμβά — ακριβώς όπως έγινε και η κανονικοποίηση του dataset.
+
+        Βήματα:
+            1. getbbox() → εύρεση ορθογωνίου περιοχής με μελάνι.
+            2. Crop στο bounding box.
+            3. Τοποθέτηση σε τετράγωνο με ανάλογο padding (~20% της μεγαλύτερης
+               πλευράς) ώστε το ψηφίο να μην «αγγίζει» τα άκρα.
+            4. GaussianBlur για μαλάκωση ακμών πριν το downsample.
+            5. Resize σε 16×16 με LANCZOS.
+            6. Επιστροφή (PIL 16×16 εικόνα, float64 ndarray 256 στοιχείων).
+
+        Returns
+        -------
+        tuple[Image.Image, np.ndarray] | None
+            None αν ο καμβάς είναι κενός (getbbox() επιστρέφει None).
+        """
+        # Βρες το tight bounding box των λευκών pixels
+        bbox = self.pil_image.getbbox()
+        if bbox is None:
+            return None  # κενός καμβάς
+
+        # Κόψε ακριβώς το περιεχόμενο
+        cropped = self.pil_image.crop(bbox)
+        cw, ch = cropped.size
+
+        # Padding: ~20% της μεγαλύτερης διάστασης, τουλάχιστον 2px
+        # Αυτό αντιστοιχεί στο "margin" που έχουν τα MNIST δεδομένα γύρω
+        # από κάθε ψηφίο μετά τη στρέβλωση/κεντράρισμά τους.
+        pad = max(2, max(cw, ch) // 5)
+
+        # Δημιούργησε τετράγωνο καμβά (μαύρο φόντο) και κέντρα το crop
+        side = max(cw, ch) + 2 * pad
+        square = Image.new("L", (side, side), 0)
+        ox = (side - cw) // 2
+        oy = (side - ch) // 2
+        square.paste(cropped, (ox, oy))
+
+        # Gaussian blur πριν το downsample (μαλακώνει ακμές όπως το dataset)
+        blurred = square.filter(ImageFilter.GaussianBlur(radius=1))
+
+        # Resize σε 16×16 με LANCZOS
+        small = blurred.resize(MODEL_IMG_SIZE, Image.LANCZOS)
+        arr = np.array(small, dtype=np.float64).flatten() / 255.0
+        return small, arr
+
+    # ------------------------------------------------------------------
+    # LIVE PREVIEW (ενημέρωση μετά από κάθε stroke)
+    # ------------------------------------------------------------------
+
+    def _update_live_preview(self):
+        """
+        Ενημέρωση του preview label αμέσως μετά από κάθε stroke (mouse release).
+
+        Δείχνει στον χρήστη σε πραγματικό χρόνο τι «βλέπει» το μοντέλο μετά
+        το centering και το resize — χωρίς να εκτελεί πρόβλεψη. Αν ο καμβάς
+        είναι κενός, το preview μένει κενό.
+        """
+        result = self._preprocess()
+        if result is None:
+            return
+        small, _ = result
+        preview_img = small.resize(PREVIEW_SIZE, Image.NEAREST)
+        preview_photo = ImageTk.PhotoImage(preview_img)
+        self.preview_label.config(image=preview_photo, width=PREVIEW_SIZE[0], height=PREVIEW_SIZE[1])
+        self.preview_label.image = preview_photo
+
+    # ------------------------------------------------------------------
     # ΠΡΟΒΛΕΨΗ
     # ------------------------------------------------------------------
 
@@ -435,8 +554,8 @@ class DigitPredictor:
 
         Βήματα:
             1. Έλεγχος ότι έχει φορτωθεί μοντέλο.
-            2. Κλιμάκωση PIL εικόνας σε 16×16 με LANCZOS (υψηλής ποιότητας).
-            3. Κανονικοποίηση σε float64 διάνυσμα 256 στοιχείων, τιμές στο [0, 1].
+            2. Προεπεξεργασία μέσω _preprocess() (centering + blur + resize).
+            3. Έλεγχος κενού καμβά.
             4. Κλήση predict_digit_by_relative_residual() για πρόβλεψη.
             5. Εμφάνιση αποτελέσματος και ενημέρωση preview.
         """
@@ -446,22 +565,22 @@ class DigitPredictor:
             self.detail_label.config(text="Φόρτωσε πρώτα ένα .pkl αρχείο.")
             return
 
-        # ── Βήμα 1: Κλιμάκωση εικόνας σε 16×16 ────────────────────────────
-        # Χρησιμοποιούμε LANCZOS (Lanczos resampling) για τη βέλτιστη ποιότητα
-        # κατά τη συρρίκνωση από CANVAS_SIZE σε 16 pixels
-        small = self.pil_image.resize(MODEL_IMG_SIZE, Image.LANCZOS)
+        # ── Βήμα 1: Προεπεξεργασία (centering + blur + resize) ─────────────
+        result = self._preprocess()
+        if result is None:
+            # Κενός καμβάς — εμφάνιση μηνύματος αντί για inf residuals
+            self.result_label.config(text="✏️", fg="#888888")
+            self.detail_label.config(text="Ζωγράφισε πρώτα ένα ψηφίο στον καμβά.")
+            return
+        small, arr = result
 
-        # ── Βήμα 2: Μετατροπή σε διάνυσμα 256 στοιχείων ────────────────────
-        # Το μοντέλο εκπαιδεύτηκε με τιμές στο [0, 1], οπότε διαιρούμε με 255
-        arr = np.array(small, dtype=np.float64).flatten() / 255.0
-
-        # ── Βήμα 3: Πρόβλεψη ────────────────────────────────────────────────
+        # ── Βήμα 2: Πρόβλεψη ────────────────────────────────────────────────
         predicted = predict_digit_by_relative_residual(arr, self.digit_u_dict)
 
-        # ── Βήμα 4: Ενημέρωση αποτελέσματος ─────────────────────────────────
+        # ── Βήμα 3: Ενημέρωση αποτελέσματος ─────────────────────────────────
         self.result_label.config(text=str(predicted), fg="#1a73e8")
 
-        # ── Βήμα 5: Ενημέρωση preview ────────────────────────────────────────
+        # ── Βήμα 4: Ενημέρωση preview ────────────────────────────────────────
         # Μεγεθύνουμε το 16×16 σε PREVIEW_SIZE με NEAREST για να φαίνονται
         # ευδιάκριτα τα pixels χωρίς θόλωμα (nearest-neighbor interpolation)
         preview_img = small.resize(PREVIEW_SIZE, Image.NEAREST)
@@ -469,7 +588,7 @@ class DigitPredictor:
         self.preview_label.config(image=preview_photo, width=PREVIEW_SIZE[0], height=PREVIEW_SIZE[1])
         self.preview_label.image = preview_photo  # αποφυγή garbage collection
 
-        # ── Βήμα 6: Υπολογισμός και εμφάνιση residuals για κάθε ψηφίο ───────
+        # ── Βήμα 5: Υπολογισμός και εμφάνιση residuals για κάθε ψηφίο ───────
         # Υπολογίζουμε το σχετικό υπόλειμμα για κάθε ψηφίο ώστε να δείξουμε
         # στον χρήστη πόσο "σίγουρη" είναι η πρόβλεψη σε σχέση με τα άλλα ψηφία
         detail_lines = []
